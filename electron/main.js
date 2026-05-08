@@ -1,12 +1,21 @@
 'use strict'
 
-const { app, BrowserWindow, globalShortcut, screen, ipcMain } = require('electron')
+const { app, BrowserWindow, globalShortcut, screen, ipcMain, Tray, Menu, nativeImage, shell, dialog } = require('electron')
 const path = require('path')
+const fs = require('fs')
+const { spawn } = require('child_process')
 const net = require('net')
 const http = require('http')
 const https = require('https')
 
 const isDev = !app.isPackaged
+
+// ─── App-level state ──────────────────────────────────────────────────────────
+let obsEnabled = true
+let sessionSaveEnabled = false
+let tray = null
+let pendingUpdate = null  // { version, downloadUrl }
+let obsServer = null
 
 // ─── Session state ────────────────────────────────────────────────────────────
 const session = {
@@ -435,6 +444,7 @@ setInterval(tick,1000);
 </script></body></html>`
 
 function startOBSServer() {
+  if (obsServer) return
   const server = http.createServer((req, res) => {
     res.setHeader('Access-Control-Allow-Origin', 'null')
 
@@ -464,15 +474,236 @@ function startOBSServer() {
   // Bind to loopback only — never expose to the network
   server.listen(3000, '127.0.0.1')
   server.on('error', () => {
-    // Port 3000 already in use; OBS mode unavailable this run
+    obsServer = null  // Port 3000 already in use; OBS mode unavailable this run
   })
+  obsServer = server
+}
+
+function stopOBSServer() {
+  if (!obsServer) return
+  obsServer.close()
+  obsServer = null
+}
+
+// ─── Preferences ─────────────────────────────────────────────────────────────
+function loadPrefs() {
+  try {
+    return JSON.parse(fs.readFileSync(path.join(app.getPath('userData'), 'preferences.json'), 'utf8'))
+  } catch (_) { return {} }
+}
+
+function savePrefs(data) {
+  try {
+    fs.writeFileSync(path.join(app.getPath('userData'), 'preferences.json'), JSON.stringify(data, null, 2))
+  } catch (_) {}
+}
+
+// ─── Session persistence ──────────────────────────────────────────────────────
+function saveSessionOnQuit() {
+  if (!sessionSaveEnabled || sessionHistory.length === 0) return
+  try {
+    const dir = path.join(app.getPath('userData'), 'sessions')
+    fs.mkdirSync(dir, { recursive: true })
+    const stamp = new Date().toISOString().slice(0, 19).replace(/[T:]/g, '-')
+    fs.writeFileSync(
+      path.join(dir, `session-${stamp}.json`),
+      JSON.stringify({
+        wins: session.wins, losses: session.losses,
+        streak: session.streak, mmr: session.mmr,
+        history: sessionHistory,
+      }, null, 2)
+    )
+  } catch (_) {}
+}
+
+// ─── Tray ─────────────────────────────────────────────────────────────────────
+function buildTrayMenu() {
+  const version = app.getVersion()
+  const items = [
+    {
+      label: "Activer l'overlay OBS",
+      type: 'checkbox',
+      checked: obsEnabled,
+      click(item) {
+        obsEnabled = item.checked
+        savePrefs({ obsEnabled, sessionSaveEnabled })
+        item.checked ? startOBSServer() : stopOBSServer()
+        refreshTrayMenu()
+      },
+    },
+    {
+      label: 'Activer la sauvegarde des sessions',
+      type: 'checkbox',
+      checked: sessionSaveEnabled,
+      click(item) {
+        sessionSaveEnabled = item.checked
+        savePrefs({ obsEnabled, sessionSaveEnabled })
+        refreshTrayMenu()
+      },
+    },
+    { type: 'separator' },
+  ]
+
+  if (pendingUpdate) {
+    items.push({
+      label: `Mettre à jour vers v${pendingUpdate.version}`,
+      click: () => applyUpdate(),
+    })
+    items.push({ type: 'separator' })
+  }
+
+  items.push({ label: 'Quitter', click: () => app.quit() })
+  items.push({ type: 'separator' })
+  items.push({ label: `v${version}`, enabled: false })
+
+  return Menu.buildFromTemplate(items)
+}
+
+function refreshTrayMenu() {
+  if (tray && !tray.isDestroyed()) tray.setContextMenu(buildTrayMenu())
+}
+
+function createTray() {
+  const iconPath = path.join(__dirname, '../assets/preview.png')
+  const icon = fs.existsSync(iconPath)
+    ? nativeImage.createFromPath(iconPath).resize({ width: 16, height: 16 })
+    : nativeImage.createEmpty()
+
+  tray = new Tray(icon)
+  tray.setToolTip('RL Live Tracker')
+  tray.setContextMenu(buildTrayMenu())
+
+  tray.on('double-click', () => {
+    if (!historyWindow || historyWindow.isDestroyed()) {
+      createHistoryWindow()
+    } else if (historyWindow.isVisible()) {
+      historyWindow.hide()
+    } else {
+      historyWindow.show()
+    }
+  })
+}
+
+// ─── Auto-updater (portable, GitHub releases) ─────────────────────────────────
+function isNewer(a, b) {
+  const p = (v) => v.split('.').map(Number)
+  const [aM, am, ap] = p(a)
+  const [bM, bm, bp] = p(b)
+  return aM !== bM ? aM > bM : am !== bm ? am > bm : ap > bp
+}
+
+function fetchJSON(url) {
+  return new Promise((resolve, reject) => {
+    const mod = url.startsWith('https') ? https : http
+    const req = mod.get(
+      url,
+      { headers: { 'User-Agent': `rl-live-tracker/${app.getVersion()}` }, timeout: 10_000 },
+      (res) => {
+        let raw = ''
+        res.on('data', (c) => { raw += c })
+        res.on('end', () => { try { resolve(JSON.parse(raw)) } catch (e) { reject(e) } })
+      }
+    )
+    req.on('error', reject)
+    req.on('timeout', () => req.destroy(new Error('timeout')))
+  })
+}
+
+function downloadFileTo(url, dest) {
+  return new Promise((resolve, reject) => {
+    const attempt = (currentUrl) => {
+      const mod = currentUrl.startsWith('https') ? https : http
+      mod.get(
+        currentUrl,
+        { headers: { 'User-Agent': `rl-live-tracker/${app.getVersion()}` } },
+        (res) => {
+          if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+            return attempt(res.headers.location)
+          }
+          if (res.statusCode !== 200) return reject(new Error(`HTTP ${res.statusCode}`))
+          const file = fs.createWriteStream(dest)
+          res.pipe(file)
+          file.on('finish', () => file.close(resolve))
+          file.on('error', reject)
+        }
+      ).on('error', reject)
+    }
+    attempt(url)
+  })
+}
+
+async function checkForUpdates() {
+  if (isDev) return
+  try {
+    const data = await fetchJSON('https://api.github.com/repos/aubriand/rl-live-tracker/releases/latest')
+    const latest = (data.tag_name ?? '').replace(/^v/, '')
+    const current = app.getVersion()
+    console.log(`Latest release: ${latest}, current version: ${current}`)
+    if (!latest || !isNewer(latest, current)) return
+
+    const asset = data.assets?.find((a) => /\.exe$/i.test(a.name))
+    if (!asset) return
+
+    pendingUpdate = { version: latest, downloadUrl: asset.browser_download_url }
+    refreshTrayMenu()
+    if (tray && !tray.isDestroyed()) {
+      tray.displayBalloon({
+        title: 'RL Live Tracker',
+        content: `Version ${latest} disponible. Ouvrez le menu pour mettre à jour.`,
+        iconType: 'info',
+      })
+    }
+  } catch (_) {
+    // Network unavailable or GitHub API rate-limited — silently ignore
+  }
+}
+
+async function applyUpdate() {
+  if (!pendingUpdate) return
+  const exePath = app.getPath('exe')
+  const tmpExe = path.join(app.getPath('temp'), `rl-live-tracker-${pendingUpdate.version}.exe`)
+
+  tray?.setToolTip('RL Live Tracker — Téléchargement…')
+  try {
+    await downloadFileTo(pendingUpdate.downloadUrl, tmpExe)
+  } catch (err) {
+    tray?.setToolTip('RL Live Tracker')
+    dialog.showErrorBox('Erreur de mise à jour', `Impossible de télécharger la mise à jour.\n${err.message}`)
+    return
+  }
+  tray?.setToolTip('RL Live Tracker')
+
+  // Batch script: wait for current process to exit, replace exe, relaunch
+  const batchPath = path.join(app.getPath('temp'), 'rl-live-tracker-update.bat')
+  const bat = [
+    '@echo off',
+    'timeout /t 2 /nobreak >nul',
+    `copy /y "${tmpExe}" "${exePath}"`,
+    `start "" "${exePath}"`,
+    `del "${tmpExe}"`,
+    `del "${batchPath}"`,
+  ].join('\r\n')
+
+  try {
+    fs.writeFileSync(batchPath, bat, 'utf8')
+    spawn('cmd.exe', ['/c', batchPath], { detached: true, stdio: 'ignore' }).unref()
+    app.quit()
+  } catch (err) {
+    dialog.showErrorBox('Erreur de mise à jour', `Impossible d'appliquer la mise à jour.\n${err.message}`)
+  }
 }
 
 // ─── App lifecycle ────────────────────────────────────────────────────────────
 app.whenReady().then(() => {
+  const prefs = loadPrefs()
+  obsEnabled = prefs.obsEnabled !== false
+  sessionSaveEnabled = prefs.sessionSaveEnabled === true
+
   createWindow()
+  createTray()
   connectStatsAPI()
-  startOBSServer()
+  if (obsEnabled) startOBSServer()
+  setTimeout(checkForUpdates, 5000)
 
   ipcMain.handle('history:get', () => [...sessionHistory])
 
@@ -497,7 +728,7 @@ app.whenReady().then(() => {
 })
 
 app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') app.quit()
+  // App lives in the system tray — do not auto-quit on window close
 })
 
 app.on('will-quit', () => {
@@ -506,4 +737,7 @@ app.on('will-quit', () => {
   if (reconnectTimer) clearTimeout(reconnectTimer)
   if (statsSocket) statsSocket.destroy()
   if (historyWindow && !historyWindow.isDestroyed()) historyWindow.destroy()
+  if (obsServer) obsServer.close()
+  if (tray && !tray.isDestroyed()) tray.destroy()
+  saveSessionOnQuit()
 })
