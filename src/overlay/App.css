@@ -1,0 +1,226 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  background: transparent;
+  overflow: hidden;
+  user-select: none;
+  -webkit-app-region: no-drag;
+}
+
+.overlay {
+  display: inline-flex;
+  gap: 12px;
+  align-items: center;
+  background: rgba(0, 0, 0, 0.65);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  border-radius: 8px;
+  padding: 8px 14px;
+  font-family: 'Segoe UI', system-ui, sans-serif;
+  color: #ffffff;
+}
+
+.stat {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-width: 34px;
+}
+
+.label {
+  font-size: 9px;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  opacity: 0.6;
+  margin-bottom: 2px;
+}
+
+.value {
+  font-size: 20px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.wins {
+  color: #4ade80;
+}
+
+.losses {
+  color: #f87171;
+}
+
+.streak-pos {
+  font-size: 20px;
+  font-weight: 700;
+  line-height: 1;
+  color: #4ade80;
+}
+
+.streak-neg {
+  font-size: 20px;
+  font-weight: 700;
+  line-height: 1;
+  color: #f87171;
+}
+
+/* ─── History Panel ──────────────────────────────────────────────────────────── */
+
+.h-panel {
+  min-height: 100vh;
+  background: #111827;
+  color: #f9fafb;
+  font-family: 'Segoe UI', system-ui, sans-serif;
+  padding: 18px 20px;
+  overflow-y: auto;
+}
+
+.h-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 14px;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.h-title {
+  font-size: 16px;
+  font-weight: 700;
+  color: #f9fafb;
+  letter-spacing: 0.3px;
+}
+
+.h-badges {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.h-badge {
+  padding: 3px 10px;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 600;
+  background: #1f2937;
+  color: #9ca3af;
+}
+.h-badge.win    { background: rgba(74,222,128,0.12);  color: #4ade80; }
+.h-badge.loss   { background: rgba(248,113,113,0.12); color: #f87171; }
+.h-badge.mmr    { background: rgba(96,165,250,0.12);  color: #60a5fa; }
+.h-badge.neutral{ background: #1f2937; color: #9ca3af; }
+
+/* W/L bar timeline */
+.h-timeline {
+  display: flex;
+  gap: 3px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+.h-tl-bar {
+  flex: 1;
+  min-width: 12px;
+  max-width: 32px;
+  height: 6px;
+  border-radius: 3px;
+}
+.h-tl-bar.win  { background: #4ade80; }
+.h-tl-bar.loss { background: #f87171; }
+
+.h-card {
+  background: #1f2937;
+  border-radius: 10px;
+  padding: 14px 16px;
+  margin-bottom: 12px;
+}
+
+.h-section-title {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 1.4px;
+  text-transform: uppercase;
+  color: #4b5563;
+  margin-bottom: 10px;
+}
+
+/* Chart tooltip */
+.h-chart-empty {
+  text-align: center;
+  color: #374151;
+  padding: 20px 0;
+  font-size: 12px;
+}
+
+.h-chart-tooltip {
+  position: absolute;
+  transform: translate(-50%, -110%);
+  background: #0f172a;
+  border: 1px solid #374151;
+  border-radius: 6px;
+  padding: 5px 10px;
+  pointer-events: none;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  white-space: nowrap;
+  z-index: 10;
+}
+.h-tt-result        { font-size: 11px; font-weight: 700; }
+.h-tt-result.win    { color: #4ade80; }
+.h-tt-result.loss   { color: #f87171; }
+.h-tt-mmr           { font-size: 13px; font-weight: 700; color: #60a5fa; }
+.h-tt-meta          { font-size: 10px; color: #4b5563; }
+
+/* Match list */
+.h-match-list {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  max-height: 260px;
+  overflow-y: auto;
+}
+
+.h-match {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  border-radius: 6px;
+  background: #111827;
+  font-size: 13px;
+  border-left: 3px solid transparent;
+}
+.h-match.win  { border-left-color: #4ade80; }
+.h-match.loss { border-left-color: #f87171; }
+
+.h-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.h-dot.win  { background: #4ade80; }
+.h-dot.loss { background: #f87171; }
+
+.h-result-label       { font-weight: 700; width: 14px; font-size: 12px; }
+.h-result-label.win   { color: #4ade80; }
+.h-result-label.loss  { color: #f87171; }
+
+.h-time   { color: #4b5563; font-size: 11px; min-width: 36px; }
+.h-record { margin-left: auto; color: #6b7280; font-size: 12px; }
+.h-mmr    { color: #60a5fa; font-weight: 600; font-size: 12px; }
+
+.h-streak     { font-size: 12px; font-weight: 700; min-width: 24px; text-align: right; }
+.h-streak.pos { color: #4ade80; }
+.h-streak.neg { color: #f87171; }
+
+.h-empty {
+  text-align: center;
+  color: #374151;
+  padding: 20px;
+  font-size: 13px;
+}
