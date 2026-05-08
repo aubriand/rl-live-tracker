@@ -33,6 +33,12 @@
     "win": {
       "target": "portable"
     },
+    "mac": {
+      "target": "dmg"
+    },
+    "linux": {
+      "target": "AppImage"
+    },
     "directories": {
       "output": "dist-electron"
     },
