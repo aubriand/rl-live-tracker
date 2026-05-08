@@ -1,6 +1,6 @@
 {
   "name": "rl-live-tracker",
-  "version": "1.0.5",
+  "version": "1.0.6",
   "private": true,
   "description": "Rocket League live stats overlay",
   "main": "electron/main.js",
