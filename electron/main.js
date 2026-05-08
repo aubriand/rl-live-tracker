@@ -673,15 +673,20 @@ async function applyUpdate() {
   }
   tray?.setToolTip('RL Live Tracker')
 
-  // Batch script: wait for current process to exit, replace exe, relaunch
+  // Batch script: wait for current process to exit, replace exe in-place, relaunch
   const batchPath = path.join(app.getPath('temp'), 'rl-live-tracker-update.bat')
   const bat = [
     '@echo off',
     'timeout /t 2 /nobreak >nul',
+    ':retry',
     `copy /y "${tmpExe}" "${exePath}"`,
+    'if errorlevel 1 (',
+    '  timeout /t 1 /nobreak >nul',
+    '  goto retry',
+    ')',
     `start "" "${exePath}"`,
-    `del "${tmpExe}"`,
-    `del "${batchPath}"`,
+    `del /f /q "${tmpExe}"`,
+    `del /f /q "%~f0"`,
   ].join('\r\n')
 
   try {
