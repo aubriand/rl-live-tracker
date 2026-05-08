@@ -661,7 +661,7 @@ async function checkForUpdates() {
 async function applyUpdate() {
   if (!pendingUpdate) return
   const exePath = app.getPath('exe')
-  const tmpExe = path.join(app.getPath('temp'), `rl-live-tracker-${pendingUpdate.version}.exe`)
+  const tmpExe = path.join(app.getPath('temp'), 'rl-live-tracker-update.exe')
 
   tray?.setToolTip('RL Live Tracker — Téléchargement…')
   try {
@@ -673,25 +673,40 @@ async function applyUpdate() {
   }
   tray?.setToolTip('RL Live Tracker')
 
-  // Batch script: wait for current process to exit, replace exe in-place, relaunch
-  const batchPath = path.join(app.getPath('temp'), 'rl-live-tracker-update.bat')
-  const bat = [
-    '@echo off',
-    'timeout /t 2 /nobreak >nul',
-    ':retry',
-    `copy /y "${tmpExe}" "${exePath}"`,
-    'if errorlevel 1 (',
-    '  timeout /t 1 /nobreak >nul',
-    '  goto retry',
-    ')',
-    `start "" "${exePath}"`,
-    `del /f /q "${tmpExe}"`,
-    `del /f /q "%~f0"`,
-  ].join('\r\n')
+  // PowerShell script: handles Unicode paths (accents, spaces), waits on the real PID,
+  // renames the old exe instead of overwriting it (works even while the process is still
+  // finishing), then copies the new one in its place and relaunches.
+  const ps1Path = path.join(app.getPath('temp'), 'rl-live-tracker-update.ps1')
+  const oldExe  = exePath + '.old'
+  // Escape single-quotes for PS1 single-quoted strings
+  const q = s => s.replace(/'/g, "''")
+  const lines = [
+    `$mainPid = ${process.pid}`,
+    `while (Get-Process -Id $mainPid -ErrorAction SilentlyContinue) { Start-Sleep -Milliseconds 300 }`,
+    `Start-Sleep -Milliseconds 800`,
+    `$src = '${q(tmpExe)}'`,
+    `$dst = '${q(exePath)}'`,
+    `$old = '${q(oldExe)}'`,
+    // Rename old exe out of the way (works even if it was the running process)
+    `Rename-Item -LiteralPath $dst -NewName ([System.IO.Path]::GetFileName($old)) -Force -ErrorAction SilentlyContinue`,
+    // Copy new exe to original location
+    `Copy-Item -LiteralPath $src -Destination $dst -Force`,
+    // Relaunch from original path
+    `Start-Process $dst`,
+    `Start-Sleep -Seconds 2`,
+    `Remove-Item -LiteralPath $old -Force -ErrorAction SilentlyContinue`,
+    `Remove-Item -LiteralPath $src -Force -ErrorAction SilentlyContinue`,
+    `Remove-Item -LiteralPath $MyInvocation.MyCommand.Path -Force -ErrorAction SilentlyContinue`,
+  ]
 
   try {
-    fs.writeFileSync(batchPath, bat, 'utf8')
-    spawn('cmd.exe', ['/c', batchPath], { detached: true, stdio: 'ignore' }).unref()
+    fs.writeFileSync(ps1Path, lines.join('\n'), 'utf8')
+    spawn('powershell.exe', [
+      '-ExecutionPolicy', 'Bypass',
+      '-WindowStyle', 'Hidden',
+      '-NonInteractive',
+      '-File', ps1Path,
+    ], { detached: true, stdio: 'ignore' }).unref()
     app.quit()
   } catch (err) {
     dialog.showErrorBox('Erreur de mise à jour', `Impossible d'appliquer la mise à jour.\n${err.message}`)
