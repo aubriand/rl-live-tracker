@@ -31,7 +31,7 @@ jobs:
         with:
           name: dist-windows
           path: |
-            dist/*.exe
+            dist-electron/*.exe
 
   build-macos:
     name: Build (macOS)
@@ -55,8 +55,8 @@ jobs:
         with:
           name: dist-macos
           path: |
-            dist/*.dmg
-            dist/*.dmg.blockmap
+            dist-electron/*.dmg
+            dist-electron/*.dmg.blockmap
 
   build-linux:
     name: Build (Linux)
@@ -80,7 +80,7 @@ jobs:
         with:
           name: dist-linux
           path: |
-            dist/*.AppImage
+            dist-electron/*.AppImage
 
   release:
     name: Create GitHub Release
