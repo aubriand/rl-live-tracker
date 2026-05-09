@@ -646,7 +646,6 @@ async function checkForUpdates() {
     const data = await fetchJSON('https://api.github.com/repos/aubriand/rl-live-tracker/releases/latest')
     const latest = (data.tag_name ?? '').replace(/^v/, '')
     const current = app.getVersion()
-    console.log(`Latest release: ${latest}, current version: ${current}`)
     if (!latest || !isNewer(latest, current)) return
 
     const asset = data.assets?.find((a) => /\.exe$/i.test(a.name))
